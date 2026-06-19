@@ -12,7 +12,6 @@ from typing import Optional
 
 import cv2
 import numpy as np
-from scipy.optimize import linear_sum_assignment
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -90,60 +89,59 @@ def iou(box_a: dict, box_b: dict) -> float:
     return inter_area / union_area if union_area > 0 else 0
 
 
+def _track_iou(a: dict, b: dict) -> float:
+    """IoU between two bounding boxes."""
+    wa, ha = a.get("width", 10), a.get("height", 10)
+    wb, hb = b.get("width", 10), b.get("height", 10)
+    x_a = max(a["x"] - wa/2, b["x"] - wb/2)
+    y_a = max(a["y"] - ha/2, b["y"] - hb/2)
+    x_b = min(a["x"] + wa/2, b["x"] + wb/2)
+    y_b = min(a["y"] + ha/2, b["y"] + hb/2)
+    inter = max(0, x_b-x_a) * max(0, y_b-y_a)
+    return inter / (wa*ha + wb*hb - inter + 1e-9)
+
 def track_detections(detections_per_frame: list[list[dict]], iou_threshold: float = 0.3):
     """
-    Link detections across frames using Hungarian algorithm.
+    Greedy nearest-neighbor tracking across frames.
+    Replaces scipy-based Hungarian algorithm for better Render.com compatibility.
     Returns list of tracks: [{frame_idx, x, y, track_id}]
     """
     tracks = []
     next_track_id = 0
-    active_tracks = []  # [{track_id, last_detection}]
+    active = {}  # track_id -> last_detection
 
     for frame_idx, detections in enumerate(detections_per_frame):
         if not detections:
             continue
 
-        # Compute cost matrix (1 - IoU)
-        cost_matrix = np.zeros((len(active_tracks), len(detections)))
-        for i, track in enumerate(active_tracks):
+        # Greedy match: each track gets its nearest detection
+        matched = set()
+        new_active = {}
+
+        for tid, last in active.items():
+            best_j = -1
+            best_iou = iou_threshold
             for j, det in enumerate(detections):
-                cost_matrix[i, j] = 1 - iou(track["last_detection"], det)
+                if j in matched:
+                    continue
+                iou_val = _track_iou(last, det)
+                if iou_val > best_iou:
+                    best_iou = iou_val
+                    best_j = j
+            if best_j >= 0:
+                d = detections[best_j]
+                tracks.append({"frame_idx": frame_idx, "x": d["x"], "y": d["y"], "track_id": tid})
+                matched.add(best_j)
+                new_active[tid] = d
 
-        # Hungarian matching
-        if cost_matrix.size > 0:
-            row_ind, col_ind = linear_sum_assignment(cost_matrix)
-            matched_detections = set()
-
-            for r, c in zip(row_ind, col_ind):
-                if cost_matrix[r, c] <= (1 - iou_threshold):
-                    track = active_tracks[r]
-                    det = detections[c]
-                    track["last_detection"] = det
-                    tracks.append({
-                        "frame_idx": frame_idx,
-                        "x": det["x"],
-                        "y": det["y"],
-                        "track_id": track["track_id"],
-                    })
-                    matched_detections.add(c)
-        else:
-            matched_detections = set()
-
-        # Spawn new tracks for unmatched detections
         for j, det in enumerate(detections):
-            if j not in matched_detections:
-                new_track = {"track_id": next_track_id, "last_detection": det}
-                active_tracks.append(new_track)
-                tracks.append({
-                    "frame_idx": frame_idx,
-                    "x": det["x"],
-                    "y": det["y"],
-                    "track_id": next_track_id,
-                })
+            if j not in matched:
+                tid = next_track_id
                 next_track_id += 1
+                tracks.append({"frame_idx": frame_idx, "x": det["x"], "y": det["y"], "track_id": tid})
+                new_active[tid] = det
 
-        # Prune old tracks (remove if no match in last 3 frames)
-        active_tracks = [t for t in active_tracks if t["last_detection"] in detections]
+        active = new_active
 
     return tracks
 
