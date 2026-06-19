@@ -17,10 +17,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import httpx
 
-# Biomechanics imports
-from mediapipe_pose import PoseExtractor
-from feature_engineering import extract_features, BiomechFeatures, features_to_array
-from risk_model import LightGBMInjuryRisk, HybridRiskModel
 
 # =============================================================================
 # CONFIG — Fill in your Roboflow credentials
@@ -282,9 +278,10 @@ injury_risk_model: Optional[LightGBMInjuryRisk] = None
 hybrid_model: Optional[HybridRiskModel] = None
 
 
-def get_pose_extractor() -> PoseExtractor:
+def get_pose_extractor() -> "PoseExtractor":
     global pose_extractor
     if pose_extractor is None:
+        from mediapipe_pose import PoseExtractor
         pose_extractor = PoseExtractor(
             min_detection_confidence=0.5,
             min_tracking_confidence=0.5,
@@ -292,16 +289,18 @@ def get_pose_extractor() -> PoseExtractor:
     return pose_extractor
 
 
-def get_injury_risk_model() -> LightGBMInjuryRisk:
+def get_injury_risk_model() -> "LightGBMInjuryRisk":
     global injury_risk_model
     if injury_risk_model is None:
+        from risk_model import LightGBMInjuryRisk
         injury_risk_model = LightGBMInjuryRisk()
     return injury_risk_model
 
 
-def get_hybrid_model() -> HybridRiskModel:
+def get_hybrid_model() -> "HybridRiskModel":
     global hybrid_model
     if hybrid_model is None:
+        from risk_model import HybridRiskModel
         hybrid_model = HybridRiskModel()
     return hybrid_model
 
@@ -379,6 +378,7 @@ async def analyze_biomechanics(file: UploadFile = File(...)):
 
     try:
         # 1. Extract pose landmarks from video
+        from feature_engineering import extract_features, BiomechFeatures, features_to_array
         pose_ext = get_pose_extractor()
         cap = cv2.VideoCapture(tmp_path)
         video_fps = cap.get(cv2.CAP_PROP_FPS)
