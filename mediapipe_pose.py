@@ -43,7 +43,7 @@ class PoseExtractor:
             base_options=base_options,
             running_mode=vision.RunningMode.VIDEO,
             min_pose_detection_confidence=min_detection_confidence,
-            min_pose_tracking_confidence=min_tracking_confidence,
+            min_tracking_confidence=min_tracking_confidence,
             output_segmentation_masks=False,
         )
         self.detector = vision.PoseLandmarker.create_from_options(options)
